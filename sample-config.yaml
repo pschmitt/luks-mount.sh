@@ -1,0 +1,27 @@
+secret_drive:
+  luks:
+    # LUKS device
+    device: /dev/disk/by-uuid/abcd-1234-sdsds-2121211
+    # Optional key slot id to use
+    key_slot: 3
+  device:
+    # This is the device mapper name as in:
+    # cryptsetup luksOpen $LUKS_DEVICE $DEVICE_NAME
+    name: data
+  # Optional callbacks to be executed after the devices were mounted
+  callback:
+    - df -h | grep data
+  mounts:
+    # Simple device example
+    - name: secrets
+      # This should match the device name (.secret_drive.device.name)
+      device: /dev/mapper/data
+      mountpoint: /mnt/secrets
+
+    # LVM example
+    - name: backups
+      device: /dev/mapper/data-backups
+      mountpoint: /mnt/backups
+    - name: random-stuff
+      device: /dev/mapper/data-random-stuff
+      mountpoint: /mnt/random-stuff
