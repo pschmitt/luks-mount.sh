@@ -33,10 +33,14 @@ config_keys() {
 
 config_get() {
   local config_dir config_file
+  local global_config=/etc/luks-mount.yaml
 
-  if [[ -n "$CONFIG_FILE" ]]
+  if [[ -n "$CONFIG_FILE" && -r "$CONFIG_FILE" ]]
   then
     config_file="$CONFIG_FILE"
+  elif [[ -r "$global_config" ]]
+  then
+    config_file="$global_config"
   else
     config_dir="$(cd "$(dirname "$0")" >/dev/null 2>&1 || return 1; pwd -P)"
     config_file="${config_dir}/config.yaml"
