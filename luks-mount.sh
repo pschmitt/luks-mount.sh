@@ -150,7 +150,7 @@ callback_exec() {
   for callback in "${callbacks[@]}"
   do
     echo "⚡Executing \"$callback\"..."
-    $callback
+    sh -c "$callback"
   done
 }
 
