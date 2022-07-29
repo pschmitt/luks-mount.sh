@@ -184,8 +184,9 @@ then
     if ! magic_mount "${DEVICE}"
     then
       RC=1
+    else
+      callback_exec "${DEVICE}"
     fi
-    callback_exec "${DEVICE}"
   done
 
   exit "$RC"
