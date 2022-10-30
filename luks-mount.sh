@@ -259,6 +259,12 @@ then
     mount)
       for DEVICE in $(config_keys)
       do
+        if check_device "$DEVICE" >/dev/null
+        then
+          echo "✅ Nothing to do for $DEVICE" >&2
+          continue
+        fi
+
         if ! magic_mount "${DEVICE}"
         then
           RC=1
