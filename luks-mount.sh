@@ -50,11 +50,9 @@ config_get() {
     eval "$*" "${config_file}"
 }
 
-luks_unlock() {
+luks_device_unlocked() {
   local luks_device="$1"
   local device_name="$2"
-  local key_slot="$3"
-  # local password="$4"
 
   if [[ ! -b "$luks_device" ]]
   then
@@ -64,8 +62,26 @@ luks_unlock() {
 
   if [[ -b "/dev/mapper/${device_name}" ]]
   then
-    echo "✅ Already unlocked"
+    echo "✅ Already unlocked: $device_name ($luks_device)"
     return 0
+  fi
+
+  # Device not unlocked yet.
+  return 1
+}
+
+luks_unlock() {
+  local luks_device="$1"
+  local device_name="$2"
+  local key_slot="$3"
+  # local password="$4"
+
+  luks_device_unlocked "$luks_device" "$device_name"
+  local rc="$?"
+
+  if [[ "$rc" != 1 ]]
+  then
+    return "$rc"
   fi
 
   local extra_args=()
@@ -92,6 +108,19 @@ luks_unlock() {
   fi
 }
 
+share_is_mounted() {
+  local device="$1" name="$2" mountpoint="$3"
+
+  if mount | grep -q "${device} on ${mountpoint}"
+  then
+    echo "✅ Already mounted: ${name} on ${mountpoint}"
+    return
+  fi
+
+  # Share not mounted
+  return 1
+}
+
 mount_share() {
   local config_path="$1"
   local device name mountpoint
@@ -100,9 +129,8 @@ mount_share() {
   name="$(config_get "${config_path}.name")"
   mountpoint="$(config_get "${config_path}.mountpoint")"
 
-  if mount | grep -q "${device} on ${mountpoint}"
+  if share_is_mounted "$device" "$name" "$mountpoint"
   then
-    echo "✅ Already mounted: ${name}"
     return
   fi
 
@@ -145,6 +173,39 @@ magic_mount() {
   return "$rc"
 }
 
+check_device() {
+  local device_config="$1"
+  local luks_device device_name
+
+  luks_device="$(config_get ".${device_config}.luks.device")"
+  device_name="$(config_get ".${device_config}.device.name")"
+
+  if ! luks_device_unlocked "$luks_device" "$device_name"
+  then
+    echo "LUKS device ${luks_device} (${device_name}) not unlocked" >&2
+    return 1
+  fi
+
+  local -i rc=0
+  local -i share_id
+  local config_path device name mountpoint
+
+  for share_id in $(config_keys ".${device_config}.mounts")
+  do
+    config_path=".${device_config}.mounts.${share_id}"
+    device="$(config_get "${config_path}.device")"
+    name="$(config_get "${config_path}.name")"
+    mountpoint="$(config_get "${config_path}.mountpoint")"
+
+    if ! share_is_mounted "$device" "$name" "$mountpoint"
+    then
+      rc=1
+    fi
+  done
+
+  return "$rc"
+}
+
 callback_exec() {
   local device_config="$1"
   local -a callbacks
@@ -160,6 +221,8 @@ callback_exec() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
 then
+  ACTION="mount"
+
   while [[ -n "$*" ]]
   do
     case "$1" in
@@ -171,6 +234,10 @@ then
         CONFIG_FILE="$2"
         shift 2
         ;;
+      check|status)
+        ACTION=check
+        shift
+        ;;
       *)
         break
         ;;
@@ -179,15 +246,32 @@ then
 
   declare -i RC=0
 
-  for DEVICE in $(config_keys)
-  do
-    if ! magic_mount "${DEVICE}"
-    then
-      RC=1
-    else
-      callback_exec "${DEVICE}"
-    fi
-  done
+  case "$ACTION" in
+    check)
+      for DEVICE in $(config_keys)
+      do
+        if ! check_device "${DEVICE}"
+        then
+          RC=1
+        fi
+      done
+      ;;
+    mount)
+      for DEVICE in $(config_keys)
+      do
+        if ! magic_mount "${DEVICE}"
+        then
+          RC=1
+        else
+          callback_exec "${DEVICE}"
+        fi
+      done
+      ;;
+    *)
+      echo "Unknown action: $ACTION" >&2
+      RC=2
+      ;;
+  esac
 
   exit "$RC"
 fi
