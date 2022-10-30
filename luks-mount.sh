@@ -234,6 +234,10 @@ then
         CONFIG_FILE="$2"
         shift 2
         ;;
+      --force-callback|--fc)
+        FORCE_CALLBACK=1
+        shift
+        ;;
       check|status)
         ACTION=check
         shift
@@ -262,6 +266,11 @@ then
         if check_device "$DEVICE" >/dev/null
         then
           echo "✅ Nothing to do for $DEVICE" >&2
+
+          if [[ -n "$FORCE_CALLBACK" ]]
+          then
+            callback_exec "${DEVICE}"
+          fi
           continue
         fi
 
