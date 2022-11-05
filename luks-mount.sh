@@ -186,11 +186,11 @@ mount_share() {
 
   if ! interval=5 retry sudo mount "${device}" "${mountpoint}"
   then
-    echo "❌Mount failed for ${device_name}" >&2
+    echo "❌Mount failed for ${name}" >&2
     return 1
   fi
 
-  echo "✅ Mounted: ${device_name}"
+  echo "✅ Mounted: ${name}"
   return
 }
 
