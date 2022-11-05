@@ -50,6 +50,33 @@ config_get() {
     eval "$*" "${config_file}"
 }
 
+config_get_callback() {
+  local type="$1"
+  local device_config="$2"
+
+  config_get ".${device_config}.callbacks" 2>/dev/null | \
+    yq --exit-status --no-colors --no-doc ".${type}[]" 2>/dev/null
+}
+
+callback_exec() {
+  local type="$1"
+  local device_config="$2"
+
+  local callbacks
+  mapfile -t callbacks < <(config_get_callback "$type" "$device_config")
+
+  if [[ "${#callbacks[@]}" -gt 0 ]]
+  then
+    local cmd
+    for cmd in "${callbacks[@]}"
+    do
+      echo "🪄 Executing $type callback: \$ $cmd" >&2
+      # TODO Uncomment this before committing
+      # sh -c "${cmd}"
+    done
+  fi
+}
+
 luks_device_unlocked() {
   local luks_device="$1"
   local device_name="$2"
@@ -92,7 +119,7 @@ luks_unlock() {
 
   if ! sudo cryptsetup luksOpen "${extra_args[@]}" "${luks_device}" "${device_name}"
   then
-    echo "Failed to unlock." >&2
+    echo "Failed to unlock LUKS device ${luks_device}." >&2
     return 1
   fi
 
@@ -106,6 +133,28 @@ luks_unlock() {
     echo "❌ Failed to unlock device" >&2
     return 1
   fi
+}
+
+luks_lock() {
+  local luks_device="$1"
+  local device_name="$2"
+
+  luks_device_unlocked "$luks_device" "$device_name"
+  local rc="$?"
+
+  if [[ "$rc" == 1 ]]
+  then
+    echo "✅ $device_name: LUKS device $luks_device is already locked."
+    return 0
+  fi
+
+  if sudo cryptsetup luksClose "${luks_device}"
+  then
+    echo "Failed to lock $luks_device." >&2
+    return 1
+  fi
+
+  echo "✅ Locked."
 }
 
 share_is_mounted() {
@@ -146,6 +195,32 @@ mount_share() {
   return
 }
 
+unmount_share() {
+  local config_path="$1"
+  local device name mountpoint
+
+  device="$(config_get "${config_path}.device")"
+  name="$(config_get "${config_path}.name")"
+  mountpoint="$(config_get "${config_path}.mountpoint")"
+
+  if ! share_is_mounted "$device" "$name" "$mountpoint"
+  then
+    echo "✅ Share is already unmounted: $device on $mountpoint ($name)" >&2
+    return
+  fi
+
+  echo "⛰️  Unmounting ${device} from ${mountpoint}..."
+
+  if ! interval=5 retry sudo umount --all-targets "${device}"
+  then
+    echo "❌Unmount failed for ${device_name}" >&2
+    return 1
+  fi
+
+  echo "✅ Unmounted: ${device_name}"
+  return
+}
+
 magic_mount() {
   local device_config="$1"
   local luks_device device_name luks_key_slot
@@ -169,6 +244,33 @@ magic_mount() {
       rc=1
     fi
   done
+
+  return "$rc"
+}
+
+magic_unmount() {
+  local device_config="$1"
+  local luks_device device_name luks_key_slot
+
+  local -i rc=0
+  local -i share_id
+  for share_id in $(config_keys ".${device_config}.mounts")
+  do
+    if ! mount_share ".${device_config}.mounts.${share_id}"
+    then
+      rc=1
+    fi
+  done
+
+  luks_device="$(config_get ".${device_config}.luks.device")"
+  luks_key_slot="$(config_get ".${device_config}.luks.key_slot" 2>/dev/null)"
+  device_name="$(config_get ".${device_config}.device.name")"
+
+  if ! luks_lock "$luks_device" "$device_name" "$luks_key_slot"
+  then
+    echo "❌Failed to relock luks device $luks_device [${device_name}]" >&2
+    return 1
+  fi
 
   return "$rc"
 }
@@ -206,18 +308,6 @@ check_device() {
   return "$rc"
 }
 
-callback_exec() {
-  local device_config="$1"
-  local -a callbacks
-
-  mapfile -t callbacks < <(config_get ".${device_config}.callback[]" 2>/dev/null)
-
-  for callback in "${callbacks[@]}"
-  do
-    echo "⚡Executing \"$callback\"..."
-    sh -c "$callback"
-  done
-}
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
 then
@@ -240,6 +330,10 @@ then
         ;;
       check|status)
         ACTION=check
+        shift
+        ;;
+      umount|unmount)
+        ACTION=umount
         shift
         ;;
       *)
@@ -269,7 +363,7 @@ then
 
           if [[ -n "$FORCE_CALLBACK" ]]
           then
-            callback_exec "${DEVICE}"
+            callback_exec post_mount "${DEVICE}"
           fi
           continue
         fi
@@ -278,7 +372,25 @@ then
         then
           RC=1
         else
-          callback_exec "${DEVICE}"
+          callback_exec post_mount "${DEVICE}"
+        fi
+      done
+      ;;
+    umount)
+      for DEVICE in $(config_keys)
+      do
+        if ! check_device "$DEVICE" >/dev/null
+        then
+          echo "✅ Nothing to do for $DEVICE" >&2
+        fi
+
+        callback_exec pre_lock "${DEVICE}"
+
+        if ! magic_unmount "${DEVICE}"
+        then
+          RC=1
+        else
+          callback_exec post_lock "${DEVICE}"
         fi
       done
       ;;

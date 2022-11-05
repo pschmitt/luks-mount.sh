@@ -9,8 +9,18 @@ secret_drive:
     # cryptsetup luksOpen $LUKS_DEVICE $DEVICE_NAME
     name: data
   # Optional callbacks to be executed after the devices were mounted
-  callback:
-    - df -h | grep data
+  callbacks:
+    post_mount:
+      - df -h | grep data
+    # pre_umount:
+    #   - docker-compose -f /srv/samba/docker-compose.yaml stop
+    # post_umount:
+    #   - rm -f /some/file
+    pre_lock:
+      - echo "Relocking device..."
+    post_lock:
+      - echo "Device locked."
+
   mounts:
     # Simple device example
     - name: secrets
