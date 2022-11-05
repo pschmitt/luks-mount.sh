@@ -12,6 +12,8 @@ secret_drive:
   callbacks:
     post_mount:
       - df -h | grep data
+    post_umount:
+      - sudo vgchange --activate n mysecretvg
     pre_lock:
       - echo "Relocking device..."
     post_lock:
