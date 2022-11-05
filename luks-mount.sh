@@ -147,9 +147,9 @@ luks_lock() {
     return 0
   fi
 
-  if sudo cryptsetup luksClose "${luks_device}"
+  if ! sudo cryptsetup luksClose "${device_name}"
   then
-    echo "Failed to lock $luks_device." >&2
+    echo "❌ Failed to lock ${device_name} (${luks_device})." >&2
     return 1
   fi
 
@@ -194,7 +194,7 @@ mount_share() {
   return
 }
 
-unmount_share() {
+umount_share() {
   local config_path="$1"
   local device name mountpoint
 
@@ -216,7 +216,7 @@ unmount_share() {
     return 1
   fi
 
-  echo "✅ Unmounted: ${device_name}"
+  echo "✅ Unmounted: ${name} ($device)"
   return
 }
 
@@ -255,11 +255,18 @@ magic_unmount() {
   local -i share_id
   for share_id in $(config_keys ".${device_config}.mounts")
   do
-    if ! mount_share ".${device_config}.mounts.${share_id}"
+    if ! umount_share ".${device_config}.mounts.${share_id}"
     then
       rc=1
     fi
   done
+
+  if [[ "$rc" == 0 ]]
+  then
+    callback_exec post_umount "${DEVICE}"
+  else
+    echo "⚠️ Skipping post_umount callbacks since some shares failed to unmount." >&2
+  fi
 
   luks_device="$(config_get ".${device_config}.luks.device")"
   luks_key_slot="$(config_get ".${device_config}.luks.key_slot" 2>/dev/null)"
@@ -267,8 +274,7 @@ magic_unmount() {
 
   if ! luks_lock "$luks_device" "$device_name" "$luks_key_slot"
   then
-    echo "❌Failed to relock luks device $luks_device [${device_name}]" >&2
-    return 1
+    rc=1
   fi
 
   return "$rc"
