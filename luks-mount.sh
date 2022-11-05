@@ -71,8 +71,7 @@ callback_exec() {
     for cmd in "${callbacks[@]}"
     do
       echo "🪄 Executing $type callback: \$ $cmd" >&2
-      # TODO Uncomment this before committing
-      # sh -c "${cmd}"
+      sh -c "${cmd}"
     done
   fi
 }
