@@ -100,7 +100,15 @@ luks_unlock() {
   local luks_device="$1"
   local device_name="$2"
   local key_slot="$3"
-  # local password="$4"
+
+  local passphrase_var passphrase
+  passphrase_var="$(tr '[:lower:]' '[:upper:]' <<< "LUKS_PASSPHRASE_${device_name//-/_}")"
+
+  if [[ -v "${passphrase_var}" ]]
+  then
+    passphrase="${!passphrase_var}"
+    echo "LUKS passphrase for $luks_device provided by environment variable $passphrase_var." >&2
+  fi
 
   luks_device_unlocked "$luks_device" "$device_name"
   local rc="$?"
@@ -116,10 +124,21 @@ luks_unlock() {
     extra_args+=(--key-slot "$key_slot")
   fi
 
-  if ! sudo cryptsetup luksOpen "${extra_args[@]}" "${luks_device}" "${device_name}"
+  if [[ -n "$passphrase" ]]
   then
-    echo "Failed to unlock LUKS device ${luks_device}." >&2
-    return 1
+    # Use provided passphrase
+    if ! printf '%s' "$passphrase" | sudo cryptsetup luksOpen "${extra_args[@]}" "${luks_device}" "${device_name}"
+    then
+      echo "Failed to unlock LUKS device ${luks_device}." >&2
+      return 1
+    fi
+  else
+    # Interactive passphrase prompt
+    if ! sudo cryptsetup luksOpen "${extra_args[@]}" "${luks_device}" "${device_name}"
+    then
+      echo "Failed to unlock LUKS device ${luks_device}." >&2
+      return 1
+    fi
   fi
 
   echo "✅ Unlocked. Waiting for ${device_name}..."
